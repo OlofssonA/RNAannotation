@@ -36,54 +36,54 @@ rule create_PFAM_table:
 
 # ================================== EXPRESSION LEVELS ======================================
 
-#rule all:
-#       input: ResultDirIDX+"/expression.txt"
+#Creates Bowtie2 reference from fasta file
+rule create_bowtie2_reference:
+        input: FASTA
+        output: BowtieRef+".1.bt2", BowtieRef+".rev.1.bt2", BowtieRef+".2.bt2", BowtieRef+".rev.2.bt2", BowtieRef+".3.bt2", BowtieRef+".4.bt2"
+        shell: "bowtie2-build {FASTA} {BowtieRef}"
 
-# It structures the expression data with scope to the last table.
-#(ResultDirIDX have to be changed into something more global)
-rule create_sorted_exp:
-        input: EXP_OUT + "expression.txt"
-        output: INTERMED + "sorted_exp.txt"
-        shell: "echo -e 'Name\tExp_level' > {output} | sort -k1,1 -k2n {input} >> {output}"
+#Maps pair end reads with bowtie2
+rule run_bowtie2_PairedEnd_mapping:
+        input: ReadsDir+ "{sample}_1.fastq",ReadsDir+"{sample}_2.fastq", BowtieRef+".1.bt2"
+        output: EXP_OUT+"{sample}.sam"
+        threads: 16
+        shell: "bowtie2 --threads 16 -x {BowtieRef} -1 {ReadsDir}{wildcards.sample}_1.fastq -2 {ReadsDir}{wildcards.sample}_2.fastq -S {EXP_OUT}{wildcards.sample}.sam"
 
-# This rule can be used instead of "expression_contig" + "create_sorted_exp". (Test it First)
-#(ResultDirIDX for the OUTPUT have to be changed into something more global)
-#rule expression_contig:
-#       input: expand(IDX_OUT+"{sample}.sorted.idxstats",sample = SAMPLE)
-#       output: EXP_OUT+"expression.txt"
-#       shell: "echo -e 'Name\tExp_level' > {output} | awk '{{mapped[FNR]+=$3; contigid[FNR]= $1; seqlen[FNR]= $2}} END{{for(i=1;i<=FNR-1;i++) print contigid[i], (mapped[i]/(ARGC-1))/seqlen[i];}}' {IDX_OUT}/* | sort -k1,1 -k2n >> {output}"
+#Converts sam files to bam
+rule sam2bam:
+        input: EXP_OUT+"{sample}.sam"
+        output: EXP_OUT+"{sample}.bam"
+        shell: "samtools view -bSh -o {EXP_OUT}{wildcards.sample}.bam {EXP_OUT}{wildcards.sample}.sam"
+        
+#Sorts bam files
+rule sortbam:
+        input:EXP_OUT+"{sample}.bam"
+        output:EXP_OUT+"{sample}.sort.bam"
+        shell: "samtools sort {EXP_OUT}{wildcards.sample}.bam {EXP_OUT}{wildcards.sample}.sort"
 
-#(ResultDirIDX for the OUTPUT have to be changed into something more global)
-rule expression_contig:
-        input: expand(IDX_OUT + "{sample}.sorted.idxstats",sample =READSsample)
-        output: EXP_OUT + "expression.txt"
-        shell: "awk '{{mapped[FNR]+=$3; contigid[FNR]= $1; seqlen[FNR]= $2}} END{{for(i=1;i<=FNR-1;i++) print contigid[i], (mapped[i]/(ARGC-1))/seqlen[i];}}' {IDX_OUT}/* > {output}"
-
-rule idxstats:
-        input: EXP_OUT+"{sample}.sort.bam", EXP_OUT+"{sample}.sort.bam.bai"
-        output: IDX_OUT+"{sample}.sorted.idxstats"
-        shell: "samtools idxstats {input} > {output}"
-
+#Index bam files
 rule indexbam:
         input: EXP_OUT+"{sample}.sort.bam"
         output: EXP_OUT+"{sample}.sort.bam.bai"
         shell: "samtools index {input}"
 
-rule sortbam:
-        input: EXP_OUT+"{sample}.bam"
-        output: EXP_OUT+"{sample}.sort.bam"
-        shell: "samtools sort {input} {EXP_OUT}{wildcards.sample}.sort"
+#Create idxstats for a bam file
+rule idxstats:
+        input: EXP_OUT+"{sample}.sort.bam",ResultDirNoHit+ "{sample}.sort.bam.bai"
+        output: IDX_OUT+"{sample}.sorted.idxstats"
+        shell: "samtools idxstats {input} > {output}"
 
-rule sam2bam:
-        input: EXP_OUT+"{sample}.sam"
-        output: EXP_OUT+"{sample}.bam"
-        shell: "samtools view -bSh -o {output} {input}"
+# Takes all the samples and sum them into one table with the (#reads/seqlength)/#samples as one column and contig name as another
+rule expression_contig:
+        input: expand(IDX_OUT+"{sample}.sorted.idxstats",sample = SAMPLE)
+        output: EXP_OUT+"expression.txt"
+        shell: "printf 'Name\tExp_level'|awk '{{mapped[FNR]+=$3; contigid[FNR]= $1; seqlen[FNR]= $2}} END{{for(i=1;i<=FNR-1;i++) print contigid[i], (mapped[i]/(ARGC-1))/seqlen[i];}}' {IDX_OUT}* | sort -k1,1 -k2n >> {output}"
 
-rule run_bowtie2_mapping:
-        input: READS_DIR+"{sample}.fastq"
-        output: EXP_OUT+"{sample}.noHIT.1.fastq", EXP_OUT+"{sample}.noHIT.2.fastq", EXP_OUT+"{sample}.sam"
-        threads: 16
-        shell: "bowtie2 --threads 16 -x {REFfile} -1 -U {input} --un-conc {EXP_OUT}{wildcards.sample}.noHIT.fastq -S {EXP_OUT}{wildcards.sample}.sam"
+#Sorts the expression table so it has same sort as the other tables
+rule create_sorted_exp:
+        input: EXP_OUT+"expression.txt"
+        output: INTERMED+"sorted_exp.txt"
+        shell: "echo -e 'Name\tExp_level' > {output} | sort -k1,1 -k2n {input} >> {output}"
 
 
 # ==================================== ncRNA ========================================
